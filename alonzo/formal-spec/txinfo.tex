@@ -11,7 +11,7 @@ by $\type{P.PlutusType}$ to distinguish it from ledger types. Certain
 types, such as the bootstrap address type, cannot be passed to scripts, and
 are therefore translated as $\Nothing$. All terms made up of untranslatable
 terms also translate to $\Nothing$. For example, since a bootstrap address $a \in \AddrBS$
-is not translatable, neither is $a\in\Addr$, and the term $(a,\wcard,\wcard)~\in~\TxOut$
+is not translatable, neither is $a\in\Addr$, and $(a,\wcard,\wcard)~\in~\TxOut$
 also translates to $\Nothing$.
 
 We denote a term $t$ of a ledger type $\type{LT}$ that has been translated to the
@@ -19,11 +19,15 @@ corresponding Plutus type by $t_P$.
 
 \begin{figure*}[htb]
   \begin{align*}
+    \emph{Hash Types}
+    \ScriptHash & \type{P.ValidatorHash} \\
+    \KeyHash & \type{P.PubKeyHash} \\
+
     \TxId & \type{P.TxId} \\
     \TxIn & \type{P.TxOutRef} \\
-    \KeyHash & \type{P.PubKeyHash} \\
+
     \Ptr & \type{P.StakingPtr} \\
-    \ScriptHash & \type{P.ValidatorHash} \\
+
     \Addr  & \type{P.Address}
     \PolicyID & \type{P.CurrencySymbol} \\
     \AssetName & \type{P.TokenName} \\
@@ -33,6 +37,11 @@ corresponding Plutus type by $t_P$.
     \DCertDeRegKey & \type{P.DCertDeRegKey} \\
     \DCertDeleg & \type{P.DCertDeleg} \\
     \DCertRetirePool & \type{P.DCertRetirePool} \\
+    \emph{Script Purpose Types} \\
+    \mathsf{Cert}  & \type{P.Certifying} \\
+    \mathsf{Rwrd} & \type{P.Rewarding} \\
+    \mathsf{Mint} & \type{P.Minting} \\
+    \mathsf{Spend} & \type{P.Spending} \\
 
     \nextdef
     \emph{Translations}
@@ -53,6 +62,16 @@ corresponding Plutus type by $t_P$.
 
     \nextdef
     \nextdef
+
+    -- ===================================
+    -- translate Script Purpose
+
+    transScriptPurpose \in CC.Crypto crypto => ScriptPurpose crypto \to P.ScriptPurpose
+    transScriptPurpose (Minting policyid) = P.Minting (transPolicyID policyid)
+    transScriptPurpose (Spending txin) = P.Spending (txInfoIn' txin)
+    transScriptPurpose (Rewarding (RewardAcnt _network cred)) =
+      P.Rewarding (P.StakingHash (transStakeCred cred))
+    transScriptPurpose (Certifying dcert) = P.Certifying (transDCert dcert)
     -- =============================================
     -- translate fileds like DCert, Wdrl, and similar
 
@@ -216,6 +235,13 @@ txInfoIn (UTxO mp) txin =
 
 
 
+
+
+
+
+
+
+
 \nextdef
 transDataPair \in (DataHash c, Data era) \to (P.DatumHash, P.Datum)
 transDataPair (x, y) = (transDataHash' x, P.Datum (P.dataToBuiltinData (getPlutusData y)))
@@ -234,15 +260,6 @@ exBudgetToExUnits (P.ExBudget (P.ExCPU steps) (P.ExMemory memory)) =
       | toInteger (minBound \in a) <= i && i <= toInteger (maxBound \in a) = Just $ fromInteger i
       | otherwise = Nothing
 
--- ===================================
--- translate Script Purpose
-
-transScriptPurpose \in CC.Crypto crypto => ScriptPurpose crypto \to P.ScriptPurpose
-transScriptPurpose (Minting policyid) = P.Minting (transPolicyID policyid)
-transScriptPurpose (Spending txin) = P.Spending (txInfoIn' txin)
-transScriptPurpose (Rewarding (RewardAcnt _network cred)) =
-  P.Rewarding (P.StakingHash (transStakeCred cred))
-transScriptPurpose (Certifying dcert) = P.Certifying (transDCert dcert)
 
 -- ===================================
 
