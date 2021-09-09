@@ -22,6 +22,7 @@ corresponding Plutus type by $t_P$.
     \emph{Hash Types}
     \ScriptHash & \type{P.ValidatorHash} \\
     \KeyHash & \type{P.PubKeyHash} \\
+    \DataHash & \type{P.DatumHash} \\
 
     \TxId & \type{P.TxId} \\
     \TxIn & \type{P.TxOutRef} \\
@@ -31,19 +32,39 @@ corresponding Plutus type by $t_P$.
     \Addr  & \type{P.Address}
     \PolicyID & \type{P.CurrencySymbol} \\
     \AssetName & \type{P.TokenName} \\
+    ~\\
     \emph{Certificate Types}
     \DCert & \type{P.DCert} \\
     \DCertRegKey & \type{P.DCertRegKey} \\
     \DCertDeRegKey & \type{P.DCertDeRegKey} \\
     \DCertDeleg & \type{P.DCertDeleg} \\
     \DCertRetirePool & \type{P.DCertRetirePool} \\
+    ~\\
     \emph{Script Purpose Types} \\
     \mathsf{Cert}  & \type{P.Certifying} \\
     \mathsf{Rwrd} & \type{P.Rewarding} \\
     \mathsf{Mint} & \type{P.Minting} \\
-    \mathsf{Spend} & \type{P.Spending} \\
-
+    \mathsf{Spend} & \type{P.Spending} \\I
+    ~\\
+    \emph{Execution Budget Types} \\
+    \Integer & \type{P.ExCPU} \\
+    \Integer  & \type{P.ExMemory}\\
+    \ExUnits & \type{P.ExBudget}  \\
+    ~\\
+    \emph{TxInfo} \\
+    \TxInfo & \type{P.txInfoInputs} & \[ \type{P.TxInInfo}^? \] \\
+      & \times \type{P.txInfoOutputs} & \[ \type{P.TxOut}^? \] \\
+      & \times \type{P.txInfoFee} \Coin \\ = transValue (inject @(Mary.Value (Crypto era)) fee),
+      & \times \type{P.txInfoMint} \type{P.Value} \\ = transValue forge,
+      & \times \type{P.txInfoDCert} \\ = foldr (\c ans \to transDCert c : ans) [] (certs' tbody),
+      & \times \type{P.txInfoWdrl} \\ = Map.toList (transWdrl (wdrls' tbody)),
+      & \times \type{P.txInfoValidRange} \\ = timeRange,
+      & \times \type{P.txInfoSignatories} \\ = map transKeyHash (Set.toList (reqSignerHashes' tbody)),
+      & \times \type{P.txInfoData} \\ = map transDataPair datpairs,
+      & \times \type{P.txInfoId} \\ = P.TxId (transSafeHash (hashAnnotated @(Crypto era) tbody))
     \nextdef
+
+
     \emph{Translations}
     \fun{transAddr} & \in \Addr  \to  \type{P.Address}
     \fun{transAddr} & a = \begin{cases}
@@ -60,9 +81,74 @@ corresponding Plutus type by $t_P$.
     \DCertMir & \type{P.DCertMir} \\
 
 
+
+
+
     \nextdef
     \nextdef
 
+    \nextdef
+    exBudgetToExUnits \in P.ExBudget \to Maybe ExUnits
+    exBudgetToExUnits (P.ExBudget (P.ExCPU steps) (P.ExMemory memory)) =
+      ExUnits <$> safeFromInteger (toInteger memory)
+        <*> safeFromInteger (toInteger steps)
+      where
+        safeFromInteger \in forall a. (Integral a, Bounded a) => Integer \to Maybe a
+        safeFromInteger i
+          | toInteger (minBound \in a) <= i && i <= toInteger (maxBound \in a) = Just $ fromInteger i
+          | otherwise = Nothing
+
+
+    -- ===================================
+
+    -- | Compute a Digest of the current transaction to pass to the script
+    --   This is the major component of the valContext function.
+    txInfo \in
+      forall era tx m.
+      ( Era era,
+        Monad m,
+        Core.TxOut era ~ Alonzo.TxOut era,
+        Core.TxBody era ~ Alonzo.TxBody era,
+        Value era ~ Mary.Value (Crypto era),
+        HasField "body" tx (Core.TxBody era),
+        HasField "wits" tx (TxWitness era)
+      ) =>
+      EpochInfo m \to
+      SystemStart \to
+      UTxO era \to
+      tx \to
+      m P.TxInfo
+    txInfo ei sysS utxo tx = do
+      timeRange <- transVITime ei sysS interval
+      pure $
+        P.TxInfo
+          { P.txInfoInputs = mapMaybe (txInfoIn utxo) (Set.toList (inputs' tbody)),
+            P.txInfoOutputs = mapMaybe txInfoOut (foldr (:) [] outs),
+            P.txInfoFee = transValue (inject @(Mary.Value (Crypto era)) fee),
+            P.txInfoMint = transValue forge,
+            P.txInfoDCert = foldr (\c ans \to transDCert c : ans) [] (certs' tbody),
+            P.txInfoWdrl = Map.toList (transWdrl (wdrls' tbody)),
+            P.txInfoValidRange = timeRange,
+            P.txInfoSignatories = map transKeyHash (Set.toList (reqSignerHashes' tbody)),
+            P.txInfoData = map transDataPair datpairs,
+            P.txInfoId = P.TxId (transSafeHash (hashAnnotated @(Crypto era) tbody))
+          }
+      where
+        tbody = getField @"body" tx
+        _witnesses = getField @"wits" tx
+        outs = outputs' tbody
+        fee = txfee' tbody
+        forge = mint' tbody
+        interval = vldt' tbody
+        datpairs = Map.toList (unTxDats $ txdats' _witnesses)
+
+    \nextdef
+    transDataPair \in (DataHash c, Data era) \to (P.DatumHash, P.Datum)
+    transDataPair (x, y) = (transDataHash' x, P.Datum (P.dataToBuiltinData (getPlutusData y)))
+    \nextdef
+    transExUnits \in ExUnits \to P.ExBudget
+    transExUnits (ExUnits mem steps) =
+      P.ExBudget (P.ExCPU (fromIntegral steps)) (P.ExMemory (fromIntegral mem))
     -- ===================================
     -- translate Script Purpose
 
@@ -242,67 +328,9 @@ txInfoIn (UTxO mp) txin =
 
 
 
-\nextdef
-transDataPair \in (DataHash c, Data era) \to (P.DatumHash, P.Datum)
-transDataPair (x, y) = (transDataHash' x, P.Datum (P.dataToBuiltinData (getPlutusData y)))
-\nextdef
-transExUnits \in ExUnits \to P.ExBudget
-transExUnits (ExUnits mem steps) =
-  P.ExBudget (P.ExCPU (fromIntegral steps)) (P.ExMemory (fromIntegral mem))
-\nextdef
-exBudgetToExUnits \in P.ExBudget \to Maybe ExUnits
-exBudgetToExUnits (P.ExBudget (P.ExCPU steps) (P.ExMemory memory)) =
-  ExUnits <$> safeFromInteger (toInteger memory)
-    <*> safeFromInteger (toInteger steps)
-  where
-    safeFromInteger \in forall a. (Integral a, Bounded a) => Integer \to Maybe a
-    safeFromInteger i
-      | toInteger (minBound \in a) <= i && i <= toInteger (maxBound \in a) = Just $ fromInteger i
-      | otherwise = Nothing
 
 
--- ===================================
 
--- | Compute a Digest of the current transaction to pass to the script
---   This is the major component of the valContext function.
-txInfo \in
-  forall era tx m.
-  ( Era era,
-    Monad m,
-    Core.TxOut era ~ Alonzo.TxOut era,
-    Core.TxBody era ~ Alonzo.TxBody era,
-    Value era ~ Mary.Value (Crypto era),
-    HasField "body" tx (Core.TxBody era),
-    HasField "wits" tx (TxWitness era)
-  ) =>
-  EpochInfo m \to
-  SystemStart \to
-  UTxO era \to
-  tx \to
-  m P.TxInfo
-txInfo ei sysS utxo tx = do
-  timeRange <- transVITime ei sysS interval
-  pure $
-    P.TxInfo
-      { P.txInfoInputs = mapMaybe (txInfoIn utxo) (Set.toList (inputs' tbody)),
-        P.txInfoOutputs = mapMaybe txInfoOut (foldr (:) [] outs),
-        P.txInfoFee = transValue (inject @(Mary.Value (Crypto era)) fee),
-        P.txInfoMint = transValue forge,
-        P.txInfoDCert = foldr (\c ans \to transDCert c : ans) [] (certs' tbody),
-        P.txInfoWdrl = Map.toList (transWdrl (wdrls' tbody)),
-        P.txInfoValidRange = timeRange,
-        P.txInfoSignatories = map transKeyHash (Set.toList (reqSignerHashes' tbody)),
-        P.txInfoData = map transDataPair datpairs,
-        P.txInfoId = P.TxId (transSafeHash (hashAnnotated @(Crypto era) tbody))
-      }
-  where
-    tbody = getField @"body" tx
-    _witnesses = getField @"wits" tx
-    outs = outputs' tbody
-    fee = txfee' tbody
-    forge = mint' tbody
-    interval = vldt' tbody
-    datpairs = Map.toList (unTxDats $ txdats' _witnesses)
 
 -- ===============================================================
 -- From the specification, Figure 7 "Script Validation, cont."
@@ -323,213 +351,9 @@ data FailureDescription
   | PlutusFailure Text ByteString
   deriving (Show, Eq, Ord, Generic, NoThunks)
 
-instance ToCBOR FailureDescription where
-  toCBOR (OnePhaseFailure s) = encode $ Sum OnePhaseFailure 0 !> To s
-  toCBOR (PlutusFailure s b) = encode $ Sum PlutusFailure 1 !> To s !> To b
 
-instance FromCBOR FailureDescription where
-  fromCBOR = decode (Summands "FailureDescription" dec)
-    where
-      dec 0 = SumD OnePhaseFailure <! From
-      dec 1 = SumD PlutusFailure <! From <! From
-      dec n = Invalid n
 
-data ScriptResult = Passes | Fails ![FailureDescription]
-  deriving (Show, Generic, NoThunks)
 
-instance ToCBOR ScriptResult where
-  toCBOR Passes = encode $ Sum Passes 0
-  toCBOR (Fails fs) = encode $ Sum Fails 1 !> To fs
-
-instance FromCBOR ScriptResult where
-  fromCBOR = decode (Summands "ScriptResult" dec)
-    where
-      dec 0 = SumD Passes
-      dec 1 = SumD Fails <! From
-      dec n = Invalid n
-
-andResult \in ScriptResult \to ScriptResult \to ScriptResult
-andResult Passes Passes = Passes
-andResult Passes ans = ans
-andResult ans Passes = ans
-andResult (Fails xs) (Fails ys) = Fails (xs ++ ys)
-
-instance Semigroup ScriptResult where
-  (<>) = andResult
-
-data PlutusDebug = PlutusDebug
-  { debugCostModel \in CostModel,
-    debugExUnits \in ExUnits,
-    debugScript \in SBS.ShortByteString,
-    debugData \in [P.Data],
-    debugVersion \in Language
-  }
-  deriving (Show)
-
-data PlutusDebugInfo
-  = DebugSuccess
-  | DebugCannotDecode String
-  | DebugInfo [Text] String
-  | DebugBadHex String
-  deriving (Show)
-
-instance ToCBOR PlutusDebug where
-  toCBOR (PlutusDebug a b c d e) = encode (Rec PlutusDebug !> To a !> To b !> To c !> To d !> To e)
-
-instance FromCBOR PlutusDebug where
-  fromCBOR =
-    decode $
-      RecD PlutusDebug
-        <! D (decodeCostModel PlutusV1)
-        <! From
-        <! From
-        <! D (decodeList Cborg.decode)
-        <! From
-
-debugPlutus \in String \to PlutusDebugInfo
-debugPlutus db =
-  case B64.decode (BSU.fromString db) of
-    Left e \to DebugBadHex (show e)
-    Right bs \to
-      case decodeFull' bs of
-        Left e \to DebugCannotDecode (show e)
-        Right (PlutusDebug (CostModel cost) units script ds _version) \to
-          case P.evaluateScriptRestricting
-            P.Verbose
-            cost
-            (transExUnits units)
-            script
-            ds of
-            (logs, Left e) \to DebugInfo logs (show e)
-            (_, Right ()) \to DebugSuccess
-
--- The runPLCScript in the Specification has a slightly different type
--- than the one in the implementation below. Made necessary by the the type
--- of P.evaluateScriptRestricting which is the interface to Plutus, and in the impementation
--- we try to track why a script failed (if it does) by the [String] in the Fails constructor of ScriptResut.
-
--- | Run a Plutus Script, given the script and the bounds on resources it is allocated.
-runPLCScript \in
-  forall era.
-  Show (Script era) =>
-  Proxy era \to
-  CostModel \to
-  SBS.ShortByteString \to
-  ExUnits \to
-  [P.Data] \to
-  ScriptResult
-runPLCScript proxy (CostModel cost) scriptbytestring units ds =
-  case P.evaluateScriptRestricting
-    P.Quiet
-    cost
-    (transExUnits units)
-    scriptbytestring
-    ds of
-    (_, Left e) \to explainPlutusFailure proxy scriptbytestring e ds (CostModel cost) units
-    (_, Right ()) \to Passes
-
--- | Explain why a script might fail. Scripts come in two flavors:
---
--- (1) with 3  data arguments [data,redeemer,context]
---
--- (2) with 2 data arguments [redeemer,context].
---
--- It pays to decode the context data into a real context because that provides
--- way more information. But there is no guarantee the context data really can
--- be decoded.
-explainPlutusFailure,
-  explain_plutus_failure \in
-    forall era.
-    Show (Script era) =>
-    Proxy era \to
-    SBS.ShortByteString \to
-    P.EvaluationError \to
-    [P.Data] \to
-    CostModel \to
-    ExUnits \to
-    ScriptResult
-explainPlutusFailure _proxy scriptbytestring e ds@[dat, redeemer, info] cm eu =
-  -- A three data argument script.
-  let ss \in Script era
-      ss = PlutusScript scriptbytestring
-      name \in String
-      name = show ss
-   in case P.fromData info of
-        Nothing \to Fails [PlutusFailure line db]
-          where
-            line =
-              pack $
-                unlines
-                  [ "\nThe 3 arg plutus script (" ++ name ++ ") fails.",
-                    show e,
-                    "The data is: " ++ show dat,
-                    "The redeemer is: " ++ show redeemer,
-                    "The third data argument, does not decode to a context\n" ++ show info
-                  ]
-            db = B64.encode . serialize' $ PlutusDebug cm eu scriptbytestring ds PlutusV1
-        Just info2 \to Fails [PlutusFailure line db]
-          where
-            info3 = show (pretty (info2 \in P.ScriptContext))
-            line =
-              pack $
-                unlines
-                  [ "\nThe 3 arg plutus script (" ++ name ++ ") fails.",
-                    show e,
-                    "The data is: " ++ show dat,
-                    "The redeemer is: " ++ show redeemer,
-                    "The context is:\n" ++ info3
-                  ]
-            db = B64.encode . serialize' $ PlutusDebug cm eu scriptbytestring ds PlutusV1
-explainPlutusFailure _proxy scriptbytestring e ds@[redeemer, info] cm eu =
-  -- A two data argument script.
-  let ss \in Script era
-      ss = PlutusScript scriptbytestring
-      name \in String
-      name = show ss
-   in case P.fromData info of
-        Nothing \to Fails [PlutusFailure line db]
-          where
-            line =
-              pack $
-                unlines
-                  [ "\nThe 2 arg plutus script (" ++ name ++ ") fails.",
-                    show e,
-                    "The redeemer is: " ++ show redeemer,
-                    "The second data argument, does not decode to a context\n" ++ show info
-                  ]
-            db = B64.encode . serialize' $ PlutusDebug cm eu scriptbytestring ds PlutusV1
-        Just info2 \to Fails [PlutusFailure line db]
-          where
-            info3 = show (pretty (info2 \in P.ScriptContext))
-            line =
-              pack $
-                unlines
-                  [ "\nThe 2 arg plutus script (" ++ name ++ ") fails.",
-                    show e,
-                    "The redeemer is: " ++ show redeemer,
-                    "The context is:\n" ++ info3
-                  ]
-            db = B64.encode . serialize' $ PlutusDebug cm eu scriptbytestring ds PlutusV1
-explainPlutusFailure _proxy scriptbytestring e ds cm eu =
-  -- A script with the wrong number of arguments
-  Fails [PlutusFailure line db]
-  where
-    ss \in Script era
-    ss = PlutusScript scriptbytestring
-    name \in String
-    name = show ss
-    line =
-      pack $
-        unlines
-          ( [ "\nThe plutus script (" ++ name ++ ") fails.",
-              show e,
-              "It was passed these " ++ show (Prelude.length ds) ++ " data arguments."
-            ]
-              ++ map show ds
-          )
-    db = B64.encode . serialize' $ PlutusDebug cm eu scriptbytestring ds PlutusV1
-explain_plutus_failure = explainPlutusFailure
-{-# DEPRECATED explain_plutus_failure "In favor of properly named `explainPlutusFailure`" #-}
 
 validPlutusdata \in P.Data \to Bool
 validPlutusdata (P.Constr _n ds) = all validPlutusdata ds
