@@ -1802,7 +1802,7 @@ collectTwoPhaseScriptInputsOutputOrdering =
     apf = Alonzo Mock
     context =
       valContext
-        (runIdentity $ txInfo testEpochInfo testSystemStart (initUTxO apf) (validatingTx apf))
+        (runIdentity $ txInfo (pp apf) testEpochInfo testSystemStart (initUTxO apf) (validatingTx apf))
         (Spending $ TxIn genesisId 1)
 
 collectOrderingAlonzo :: TestTree
