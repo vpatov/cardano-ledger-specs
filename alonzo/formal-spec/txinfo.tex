@@ -1,6 +1,37 @@
 \section{TxInfo Construction}
 \label{sec:txinfo}
 
+
+  \emph{Abstract Script Validation Types}
+  %
+  \begin{equation*}
+    \begin{array}{r@{~\in~}l@{\quad\quad\quad\quad}r}
+      \var{txinfo} &\TxInfo & \text{Language-specific summary of transaction data}\\
+    \end{array}
+  \end{equation*}
+
+  &\fun{txInfo} \in \Language \to \PParams \to \UTxO \to \Tx \to \TxInfo \\
+  &\text{Summarizes transaction data} \\~\\
+  &\fun{valContext} \in \TxInfo \to \ScriptPurpose \to \Data \\
+  &\text{Pairs transaction data with a script purpose} \\~\\
+
+  \item $\fun{txInfo}$ summarizes all the necessary transaction and chain state info
+    that needs to be passed to the script interpreter. The $\Language$ argument
+    is required because different languages have different expectations of the
+    format and contents of the $\TxInfo$ summary.
+
+    Note that $\fun{txInfo}$ has a $\UTxO$ argument. Even though the full ledger UTxO
+    is passed to it, we define this function in such a way that the only
+    entries in the ledger UTxO map that a Plutus script
+    actually sees via the argument $\fun{txInfo}$ builds are the ones corresponding to the transaction
+    inputs (ie. its realized inputs). This is done in order to maintain
+    deterministic evaluation. For details, see~\ref{sec:txinfo}
+
+    \item
+      $\fun{valContext}$ constructs the \emph{validation context}. A validation context is
+      a $\Data$ term which encodes both the summary of the transaction and ledger information
+      (this is supplied by the $\fun{txInfo}$ summarization function), and the script purpose.
+
 This section specifies exactly what parts of the transaction and ledger
 state are used by the $\fun{txInfo}$ function to construct the
 $\TxInfo$ term that gets passed as an
@@ -52,16 +83,16 @@ corresponding Plutus type by $t_P$.
     \ExUnits & \type{P.ExBudget}  \\
     ~\\
     \emph{TxInfo} \\
-    \TxInfo & \type{P.txInfoInputs} & \[ \type{P.TxInInfo}^? \] \\
-      & \times \type{P.txInfoOutputs} & \[ \type{P.TxOut}^? \] \\
-      & \times \type{P.txInfoFee} \Coin \\ = transValue (inject @(Mary.Value (Crypto era)) fee),
-      & \times \type{P.txInfoMint} \type{P.Value} \\ = transValue forge,
-      & \times \type{P.txInfoDCert} \\ = foldr (\c ans \to transDCert c : ans) [] (certs' tbody),
-      & \times \type{P.txInfoWdrl} \\ = Map.toList (transWdrl (wdrls' tbody)),
-      & \times \type{P.txInfoValidRange} \\ = timeRange,
-      & \times \type{P.txInfoSignatories} \\ = map transKeyHash (Set.toList (reqSignerHashes' tbody)),
-      & \times \type{P.txInfoData} \\ = map transDataPair datpairs,
-      & \times \type{P.txInfoId} \\ = P.TxId (transSafeHash (hashAnnotated @(Crypto era) tbody))
+    \TxInfo & \seqof{ \type{P.TxInInfo}^? } & \text{inputs} \\ %\type{P.txInfoInputs} &
+      & \times & \seqof {\type{P.TxOut}^?} & \text{outputs} \\ %\type{P.txInfoOutputs}
+      & \times  \Coin & \text{fee} & \text{fee} \\ %= transValue (inject @(Mary.Value (Crypto era)) fee), \type{P.txInfoFee}
+      & \times \type{P.Value} & \text{mint field} \\ % = transValue forge, \type{P.txInfoMint}
+      & \times & \seqof{\type{P.DCert}} & \text{list of certificates} \\ %= foldr (\c ans \to transDCert c : ans) [] (certs' tbody), \type{P.txInfoDCert} 
+      & \times & \text{outputs} \\ % = Map.toList (transWdrl (wdrls' tbody)), \type{P.txInfoWdrl}
+      & \times & \text{outputs} \\ % = timeRange, \type{P.txInfoValidRange}
+      & \times & \seqof{\type{P.PubKeyHash}} & \text{hashes of keys whose signature are required} \\ % = map transKeyHash (Set.toList (reqSignerHashes' tbody)), \type{P.txInfoSignatories}
+      & \times & \seqof{(\DataHash \times \Data)} & \text{list of pairs of datum hashes and their datum preimages} \\ % = map transDataPair datpairs, \type{P.txInfoData}
+      & \times  & \type{P.TxId} & \text{transaction ID} \\ % =  (transSafeHash (hashAnnotated @(Crypto era) tbody)) \type{P.txInfoId}
     \nextdef
 
 
@@ -257,38 +288,43 @@ corresponding Plutus type by $t_P$.
 \end{figure*}
 
 
-
-slotToPOSIXTime \in
-  Monad m =>
-  EpochInfo m \to
-  SystemStart \to
-  SlotNo \to
+slotToPOSIXTime ::
+  (Monad m, HasField "_protocolVersion" (PParams era) ProtVer) =>
+  Core.PParams era ->
+  EpochInfo m ->
+  SystemStart ->
+  SlotNo ->
   m P.POSIXTime
-slotToPOSIXTime ei sysS s = do
-  P.POSIXTime . resolution . nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds
+slotToPOSIXTime pp ei sysS s = do
+  P.POSIXTime . transTime . nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds
     <$> epochInfoSlotToUTCTime ei sysS s
-\nextdef
+  where
+    transTime =
+      if HardForks.translateTimeForPlutusScripts pp
+        then
+          truncate
+            -- Convert to milliseconds
+            . (* fromInteger 1000)
+        else resolution
+
 -- | translate a validity interval to POSIX time
-transVITime \in
-  Monad m =>
-  EpochInfo m \to
-  SystemStart \to
-  ValidityInterval \to
+transVITime ::
+  (Monad m, HasField "_protocolVersion" (PParams era) ProtVer) =>
+  Core.PParams era ->
+  EpochInfo m ->
+  SystemStart ->
+  ValidityInterval ->
   m P.POSIXTimeRange
-transVITime _ _ (ValidityInterval SNothing SNothing) = pure P.always
-transVITime ei sysS (ValidityInterval (SJust i) SNothing) = do
-  t <- slotToPOSIXTime ei sysS i
+transVITime _ _ _ (ValidityInterval SNothing SNothing) = pure P.always
+transVITime pp ei sysS (ValidityInterval (SJust i) SNothing) = do
+  t <- slotToPOSIXTime pp ei sysS i
   pure $ P.from t
-transVITime ei sysS (ValidityInterval SNothing (SJust i)) = do
-  t <- slotToPOSIXTime ei sysS i
+transVITime pp ei sysS (ValidityInterval SNothing (SJust i)) = do
+  t <- slotToPOSIXTime pp ei sysS i
   pure $ P.to t
-transVITime ei sysS (ValidityInterval (SJust i) (SJust j)) = do
-  t1 <- slotToPOSIXTime ei sysS i
-  t2 <- slotToPOSIXTime ei sysS j
-  pure $
-    P.Interval
-      (P.lowerBound t1)
-      (P.strictUpperBound t2)
+transVITime pp ei sysS (ValidityInterval (SJust i) (SJust j)) = do
+  t1 <- slotToPOSIXTime pp ei sysS i
+  t2 <- slotToPOSIXTime pp ei sysS j
 
 
 -- | Given a TxIn, look it up in the UTxO. If it exists, translate it and return
