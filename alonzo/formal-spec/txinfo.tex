@@ -1,22 +1,24 @@
 \section{TxInfo Construction}
 \label{sec:txinfo}
 
+This section specifies exactly what parts of the transaction and ledger
+state are used by the $\fun{txInfo}$ function to construct the
+$\TxInfo$ term that, together with the script purpose for which the script
+is being run, gets passed as a $\Data$ argument to the Plutus interpreter.
 
-  \emph{Abstract Script Validation Types}
-  %
-  \begin{equation*}
-    \begin{array}{r@{~\in~}l@{\quad\quad\quad\quad}r}
-      \var{txinfo} &\TxInfo & \text{Language-specific summary of transaction data}\\
-    \end{array}
-  \end{equation*}
+The functions in Figure \ref{fig:txinfo-funcs} are needed to build a $\Data$ summary of a transaction.
+In this Section we use the notation $\type{P.PlutusType}$ for the Plutus type
+$\type{PlutusType}$ (specified in the Plutus library) to distinguish it from ledger types.
+The type $\type{P.ScriptContext}$ represents
+the script context. The function $\type{P.toData}$ converts a Plutus term
+into into a $\Data$ term.
 
-  &\fun{txInfo} \in \Language \to \PParams \to \UTxO \to \Tx \to \TxInfo \\
-  &\text{Summarizes transaction data} \\~\\
-  &\fun{valContext} \in \TxInfo \to \ScriptPurpose \to \Data \\
-  &\text{Pairs transaction data with a script purpose} \\~\\
+$\fun{txInfo}$ summarizes all the necessary transaction and chain state info
+    that needs to be passed to the script interpreter. Below, we specify how to
+    represent relevant transaction data as a term of a type defined in the Plutus
+    library. The $\fun{txInfo}$ function builds this representation.
 
-  \item $\fun{txInfo}$ summarizes all the necessary transaction and chain state info
-    that needs to be passed to the script interpreter. The $\Language$ argument
+    The $\Language$ argument
     is required because different languages have different expectations of the
     format and contents of the $\TxInfo$ summary.
 
@@ -25,21 +27,42 @@
     entries in the ledger UTxO map that a Plutus script
     actually sees via the argument $\fun{txInfo}$ builds are the ones corresponding to the transaction
     inputs (ie. its realized inputs). This is done in order to maintain
-    deterministic evaluation. For details, see~\ref{sec:txinfo}
+    deterministic evaluation. For details, see~\ref{sec:txinfo}.
 
-    \item
-      $\fun{valContext}$ constructs the \emph{validation context}. A validation context is
-      a $\Data$ term which encodes both the summary of the transaction and ledger information
-      (this is supplied by the $\fun{txInfo}$ summarization function), and the script purpose.
+    $\fun{valContext}$ constructs the \emph{validation context}, also referred to as the
+    script context. A validation context is
+    a $\Data$ term which encodes both the summary of the transaction and ledger information
+    (this is supplied by the $\fun{txInfo}$ summarization function), and the script purpose.
 
-This section specifies exactly what parts of the transaction and ledger
-state are used by the $\fun{txInfo}$ function to construct the
-$\TxInfo$ term that gets passed as an
-argument to the Plutus interpreter.
+\begin{figure}
+  \emph{Plutus Library Types and Functions}
+  %
+  \begin{align*}
+      &\type{P.ScriptContext} ~=~ \type{P.TxInfo} \times \type{P.ScriptPurpose} \\
+      &\text{Plutus Script Context}
+      \nextdef
+      &\fun{P.toData} \in \type{P.T} \to \Data \\
+      &\text{Constructs a Data term from a Plutus term of type P.T}
+  \end{align*}
+    \emph{Ledger Functions}
+    %
+    \begin{align*}
+        &\fun{txInfo} \in \Language \to \PParams \to \UTxO \to \Tx \to \TxInfo \\
+        &\text{Summarizes transaction data}
+        \nextdef
+        &\fun{valContext} \in \type{P.TxInfo} \to \ScriptPurpose \to \Data \\
+        &\fun{valContext}~txinfo~sp = \fun{P.toData}~(txinfo,~sp_{P})
+        &\text{Pairs transaction data with a script purpose}
+    \end{align*}
+  \caption{Transaction Summarization Functions}
+  \label{fig:txinfo-funcs}
+\end{figure}
 
-Every Plutus type $\type{PlutusType}$ in the translation functions is denoted
-by $\type{P.PlutusType}$ to distinguish it from ledger types. Certain
-types, such as the bootstrap address type, cannot be passed to scripts, and
+We give the Plutus types corresponding to the ledger counterparts in Figures \ref{fig:txinfo-types}
+and \ref{fig:txinfo-types-two}. Details for types that have non-identity translation
+functions between ledger and Plutus types are in Figure \ref{fig:txinfo-translations}.
+
+Certain types, such as the bootstrap address type, cannot be passed to scripts, and
 are therefore translated as $\Nothing$. All terms made up of untranslatable
 terms also translate to $\Nothing$. For example, since a bootstrap address $a \in \AddrBS$
 is not translatable, neither is $a\in\Addr$, and $(a,\wcard,\wcard)~\in~\TxOut$
@@ -48,29 +71,69 @@ also translates to $\Nothing$.
 We denote a term $t$ of a ledger type $\type{LT}$ that has been translated to the
 corresponding Plutus type by $t_P$.
 
+Translating certain kinds of certificates drops the data in the
+certificates, in particular, the $\DCertGen$ and $\DCertMir$ ones.
+
+The constant returned by $\fun{slotToPOSIXTime}$,
+
+\[\type{ResolutionConstant}\]
+
+Is the maximum possible value of a POSIX time interval. This will be adjusted in
+future eras to reflect the time being translated.
+
+Note that the $\Ptr$ addresses translated and passed to Plutus scripts are
+not resolvable to their corresponding key or script staking credencials. This
+is because doing a lookup in the resolution map, which part of the ledger state,
+could break determinism.
+
+During the transaction encoding and decoding process, a transaction is discarded if it is not
+encoded correctly. This includes, in particular, a check that scripts and $\Data$
+terms therein are constructed with constructors of terms of these types, themselves
+applied to correctly typed terms. Functions that perfom these checks are
+in Figure \ref{fig:data-script-check}. The $\fun{P.validateScript}$ function
+is a Plutus-library function which checks whether a bytestring represents a
+Plutus script.
+
 \begin{figure*}[htb]
   \begin{align*}
-    \emph{Hash Types}
+    \emph{Hash Types} \\
     \ScriptHash & \type{P.ValidatorHash} \\
     \KeyHash & \type{P.PubKeyHash} \\
     \DataHash & \type{P.DatumHash} \\
-
     \TxId & \type{P.TxId} \\
+    ~\\
+    \emph{Transaction Input, ie. Output Reference}  \\
     \TxIn & \type{P.TxOutRef} \\
-
+    ~\\
+    \emph{Credential Types} \\
     \Ptr & \type{P.StakingPtr} \\
-
-    \Addr  & \type{P.Address}
+    \Credential & \type{P.Credential} \\
+    \Credential & \type{P.StakingHash} \\
+    \StakeCredential & \type{P.StakingCredential} \\
+    \StakeReference crypto \to Maybe P.StakingCredential \\
+    ~\\
+    \emph{Credentials and Withdrawals} \\
+    \Wdrl & \type{P.StakingCredential} \times \Integer \\
     \PolicyID & \type{P.CurrencySymbol} \\
     \AssetName & \type{P.TokenName} \\
     ~\\
-    \emph{Certificate Types}
+    \emph{Certificate Types} \\
     \DCert & \type{P.DCert} \\
-    \DCertRegKey & \type{P.DCertRegKey} \\
-    \DCertDeRegKey & \type{P.DCertDeRegKey} \\
-    \DCertDeleg & \type{P.DCertDeleg} \\
-    \DCertRetirePool & \type{P.DCertRetirePool} \\
+    \DCertRegKey & \type{P.DCertDelegRegKey} \\
+    \DCertDeRegKey & \type{P.DCertDelegDeRegKey} \\
+    \DCertDeleg & & \type{P.DCertDelegDelegate} \\
+    \DCertRetirePool & \type{P.DCertPoolRetire} \\
     ~\\
+    \emph{Data-dropping Certificate Types} \\
+    \DCertGen & \type{P.DCertGenesis} \\
+    \DCertMir & {P.DCertMir} \\
+  \end{align*}
+  \caption{TxInfo and Constituent Types}
+  \label{fig:txinfo-types}
+\end{figure*}
+
+\begin{figure*}[htb]
+  \begin{align*}
     \emph{Script Purpose Types} \\
     \mathsf{Cert}  & \type{P.Certifying} \\
     \mathsf{Rwrd} & \type{P.Rewarding} \\
@@ -83,326 +146,97 @@ corresponding Plutus type by $t_P$.
     \ExUnits & \type{P.ExBudget}  \\
     ~\\
     \emph{TxInfo} \\
-    \TxInfo & \seqof{ \type{P.TxInInfo}^? } & \text{inputs} \\ %\type{P.txInfoInputs} &
-      & \times & \seqof {\type{P.TxOut}^?} & \text{outputs} \\ %\type{P.txInfoOutputs}
-      & \times  \Coin & \text{fee} & \text{fee} \\ %= transValue (inject @(Mary.Value (Crypto era)) fee), \type{P.txInfoFee}
-      & \times \type{P.Value} & \text{mint field} \\ % = transValue forge, \type{P.txInfoMint}
-      & \times & \seqof{\type{P.DCert}} & \text{list of certificates} \\ %= foldr (\c ans \to transDCert c : ans) [] (certs' tbody), \type{P.txInfoDCert} 
-      & \times & \text{outputs} \\ % = Map.toList (transWdrl (wdrls' tbody)), \type{P.txInfoWdrl}
-      & \times & \text{outputs} \\ % = timeRange, \type{P.txInfoValidRange}
-      & \times & \seqof{\type{P.PubKeyHash}} & \text{hashes of keys whose signature are required} \\ % = map transKeyHash (Set.toList (reqSignerHashes' tbody)), \type{P.txInfoSignatories}
-      & \times & \seqof{(\DataHash \times \Data)} & \text{list of pairs of datum hashes and their datum preimages} \\ % = map transDataPair datpairs, \type{P.txInfoData}
-      & \times  & \type{P.TxId} & \text{transaction ID} \\ % =  (transSafeHash (hashAnnotated @(Crypto era) tbody)) \type{P.txInfoId}
+    \TxInfo &= \\
+      & \seqof{ \type{P.TxInInfo}^? } \\ % & \text{inputs} \\ %\type{P.txInfoInputs} &
+      & \text{$\uparrow$ Realized inputs (built by $\fun{txInfoIn}$)} \\
+      & \times \seqof {\type{P.TxOut}^?}  \\
+      & \text{$\uparrow$ outputs} \\ %\type{P.txInfoOutputs}
+      & \times \type{P.Value} \\
+      & \text{$\uparrow$ fee, built by applying $\fun{transValue}\circ\fun{inject}$ to the $\Coin$ fee} \\ %= transValue (inject @(Mary.Value (Crypto era)) fee), \type{P.txInfoFee}
+      & \times \type{P.Value}  \\
+      & \text{$\uparrow$ mint field, built from the mint $\Value$ by $\fun{transValue}$} \\ % = transValue forge, \type{P.txInfoMint}
+      & \times \seqof{\type{P.DCert}}  \\
+      & \text{$\uparrow$ list of certificates} \\ %= foldr (\c ans \to transDCert c : ans) [] (certs' tbody), \type{P.txInfoDCert}
+      & \times (\type{P.StakingCredential} \times \Integer) \\
+      & \text{$\uparrow$ the $\Wdrl$s, reward withdrawal pairs of credential and reward amount} \\ % = Map.toList (transWdrl (wdrls' tbody)), \type{P.txInfoWdrl}
+      & \times \type{P.POSIXTimeRange} \\
+      & \text{$\uparrow$ transaction validity POSIX time range (built by $\fun{transVITime}$)} \\ % = timeRange, \type{P.txInfoValidRange}
+      & \times \seqof{\type{P.PubKeyHash}}  \\
+      & \text{$\uparrow$ hashes of keys whose signature are required} \\ % = map transKeyHash (Set.toList (reqSignerHashes' tbody)), \type{P.txInfoSignatories}
+      & \times \seqof{(\DataHash \times \Data)}  \\
+      & \text{$\uparrow$ list of pairs of datum hashes and their datum preimages} \\ % = map transDataPair datpairs, \type{P.txInfoData}
+      & \times \type{P.TxId} & \text{transaction ID} \\ % =  (transSafeHash (hashAnnotated @(Crypto era) tbody)) \type{P.txInfoId}
+      & \text{$\uparrow$ list of pairs of datum hashes and their datum preimages}
     \nextdef
+  \caption{TxInfo and Constituent Types}
+  \label{fig:txinfo-types-two}
+\end{figure*}
 
-
-    \emph{Translations}
-    \fun{transAddr} & \in \Addr  \to  \type{P.Address}
+\begin{figure*}[htb]
+  \begin{align*}
+    \fun{transAddr} & \in \Addr  \to  \type{P.Address} \\
     \fun{transAddr} & a = \begin{cases}
       \Nothing & \text{if}~a~\in~\AddrBS \\
       (ob,~st) & \text{if}~a~=~(\wcard, ob_P, st_P)
     \end{cases}
+    \text{Address translation}
     \nextdef
-    \fun{transValue} & \in \Value \to P.Value \\
+    \fun{transValue} & \in \Value \to \type{P.Value} \\
     \fun{transValue} (c, mp) & = \{~ pid_P\mapsto (aid_P \mapsto q_P) ~\mid~ pid \mapsto (aid \mapsto q) ~\in ~mp ~\} \cup
     \{~\type{P.adaSymbol}\mapsto (\type{P.adaToken} \mapsto c) ~\} \\
+    \text{Value translation}
     \nextdef
-    \DCertRegPool & \type{P.DCertRegPool} \\
-    \DCertGen & \type{P.DCertGen} \\
-    \DCertMir & \type{P.DCertMir} \\
-
-
-
-
-
-    \nextdef
-    \nextdef
-
-    \nextdef
-    exBudgetToExUnits \in P.ExBudget \to Maybe ExUnits
-    exBudgetToExUnits (P.ExBudget (P.ExCPU steps) (P.ExMemory memory)) =
-      ExUnits <$> safeFromInteger (toInteger memory)
-        <*> safeFromInteger (toInteger steps)
-      where
-        safeFromInteger \in forall a. (Integral a, Bounded a) => Integer \to Maybe a
-        safeFromInteger i
-          | toInteger (minBound \in a) <= i && i <= toInteger (maxBound \in a) = Just $ fromInteger i
-          | otherwise = Nothing
-
-
-    -- ===================================
-
-    -- | Compute a Digest of the current transaction to pass to the script
-    --   This is the major component of the valContext function.
-    txInfo \in
-      forall era tx m.
-      ( Era era,
-        Monad m,
-        Core.TxOut era ~ Alonzo.TxOut era,
-        Core.TxBody era ~ Alonzo.TxBody era,
-        Value era ~ Mary.Value (Crypto era),
-        HasField "body" tx (Core.TxBody era),
-        HasField "wits" tx (TxWitness era)
-      ) =>
-      EpochInfo m \to
-      SystemStart \to
-      UTxO era \to
-      tx \to
-      m P.TxInfo
-    txInfo ei sysS utxo tx = do
-      timeRange <- transVITime ei sysS interval
-      pure $
-        P.TxInfo
-          { P.txInfoInputs = mapMaybe (txInfoIn utxo) (Set.toList (inputs' tbody)),
-            P.txInfoOutputs = mapMaybe txInfoOut (foldr (:) [] outs),
-            P.txInfoFee = transValue (inject @(Mary.Value (Crypto era)) fee),
-            P.txInfoMint = transValue forge,
-            P.txInfoDCert = foldr (\c ans \to transDCert c : ans) [] (certs' tbody),
-            P.txInfoWdrl = Map.toList (transWdrl (wdrls' tbody)),
-            P.txInfoValidRange = timeRange,
-            P.txInfoSignatories = map transKeyHash (Set.toList (reqSignerHashes' tbody)),
-            P.txInfoData = map transDataPair datpairs,
-            P.txInfoId = P.TxId (transSafeHash (hashAnnotated @(Crypto era) tbody))
-          }
-      where
-        tbody = getField @"body" tx
-        _witnesses = getField @"wits" tx
-        outs = outputs' tbody
-        fee = txfee' tbody
-        forge = mint' tbody
-        interval = vldt' tbody
-        datpairs = Map.toList (unTxDats $ txdats' _witnesses)
-
-    \nextdef
-    transDataPair \in (DataHash c, Data era) \to (P.DatumHash, P.Datum)
-    transDataPair (x, y) = (transDataHash' x, P.Datum (P.dataToBuiltinData (getPlutusData y)))
-    \nextdef
-    transExUnits \in ExUnits \to P.ExBudget
-    transExUnits (ExUnits mem steps) =
-      P.ExBudget (P.ExCPU (fromIntegral steps)) (P.ExMemory (fromIntegral mem))
-    -- ===================================
-    -- translate Script Purpose
-
-    transScriptPurpose \in CC.Crypto crypto => ScriptPurpose crypto \to P.ScriptPurpose
-    transScriptPurpose (Minting policyid) = P.Minting (transPolicyID policyid)
-    transScriptPurpose (Spending txin) = P.Spending (txInfoIn' txin)
-    transScriptPurpose (Rewarding (RewardAcnt _network cred)) =
-      P.Rewarding (P.StakingHash (transStakeCred cred))
-    transScriptPurpose (Certifying dcert) = P.Certifying (transDCert dcert)
-    -- =============================================
-    -- translate fileds like DCert, Wdrl, and similar
-
-    transDCert \in DCert c \to P.DCert
-    transDCert (DCertDeleg (RegKey stkcred)) =
-      P.DCertDelegRegKey (P.StakingHash (transStakeCred stkcred))
-    transDCert (DCertDeleg (DeRegKey stkcred)) =
-      P.DCertDelegDeRegKey (P.StakingHash (transStakeCred stkcred))
-    transDCert (DCertDeleg (Delegate (Delegation stkcred keyhash))) =
-      P.DCertDelegDelegate
-        (P.StakingHash (transStakeCred stkcred))
-        (transKeyHash keyhash)
-    transDCert (DCertPool (RegPool pp)) =
+    \fun{transDCert} \in \DCertRegPool \to \type{P.DCertPoolRegister} \\
+    \fun{transDCert} = (DCertPool (RegPool pp)) =
       P.DCertPoolRegister (transKeyHash (_poolId pp)) (P.PubKeyHash (P.toBuiltin (transHash (_poolVrf pp))))
-    transDCert (DCertPool (RetirePool keyhash (EpochNo i))) =
-      P.DCertPoolRetire (transKeyHash keyhash) (fromIntegral i)
-    transDCert (DCertGenesis _) = P.DCertGenesis
-    transDCert (DCertMir _) = P.DCertMir
+    \text{Pool registration certificate translation}
     \nextdef
-    transWdrl \in Wdrl crypto \to Map.Map P.StakingCredential Integer
-    transWdrl (Wdrl mp) = Map.foldlWithKey' accum Map.empty mp
-      where
-        accum ans (RewardAcnt _network cred) (Coin n) =
-          Map.insert (P.StakingHash (transStakeCred cred)) n ans
+    \fun{txInfoIn} \in \UTxO \to \TxIn \to \type{P.TxInInfo} \\
+    \fun{txInfoIn} utxo txin = \begin{cases}
+        (\var{txin}_P, \var{txout}_P) & \text{when $(\var{txin}\mapsto\var{txout})\in\var{utxo}$} \\
+        \Nothing & \text{otherwise}
+      \end{cases} \\
+    \text{Builds a Plutus realized input}
     \nextdef
+    \fun{transVITime} \in \PParams \to \EpochInfo \to \SystemStart \to \ValidityInterval \to \type{P.POSIXTimeRange} \\
+    \fun{transVITime} pp ei sysS (vs, vf) =
+      \begin{cases}
+        \type{P.always} & \text{if } vs = \Nothing ~\wedge~ vf = \Nothing \\
+        \type{P.to}~(\fun{slotToPOSIXTime}~pp~ei~sysS~vf) & \text{if } vs = \Nothing ~\wedge~ vf \neq \Nothing \\
+        \type{P.from}~(\fun{slotToPOSIXTime}~pp~ei~sysS~vs) & \text{if } vs \neq \Nothing ~\wedge~ vf = \Nothing \\
+        (\fun{slotToPOSIXTime}~pp~ei~sysS~vs,~\fun{slotToPOSIXTime}~pp~ei~sysS~vf) & \text{if } vs \neq \Nothing ~\wedge~ vf \neq \Nothing \\
+      \end{cases} \\
+      \where \\
+      \fun{slotToPOSIXTime}~pp~ei~sysS~vs~=~\type{ResolutionConstant} \\
+    \text{Translate validity interval to a POSIX time range}
+  \caption{TxInfo Constituent Type Translation Functions}
+  \label{fig:txinfo-translations}
+\end{figure*}
 
-    getWitVKeyHash \in (CC.Crypto crypto, Typeable kr) => WitVKey kr crypto \to P.PubKeyHash
-    getWitVKeyHash =
-      P.PubKeyHash
-        . P.toBuiltin
-        . fromShort
-        . (\(UnsafeHash x) \to x)
-        . (\(KeyHash x) \to x)
-        . hashKey
-        . (\(WitVKey x _) \to x)
-    transValue \in forall c. Mary.Value c \to P.Value
-    transValue (Mary.Value n mp) = Map.foldlWithKey' accum1 justada mp
-      where
-        accum1 ans sym mp2 = Map.foldlWithKey' accum2 ans mp2
-          where
-            accum2 ans2 tok quantity =
-              P.unionWith
-                (+)
-                ans2
-                (P.singleton (transPolicyID sym) (transAssetName tok) quantity)
-        justada = P.singleton P.adaSymbol P.adaToken n
-    transAddr \in Addr  \to Maybe P.Address
-    transAddr (Addr _net object stake) = Just (P.Address (transCred object) (transStakeReference stake))
-    transAddr (AddrBootstrap _bootaddr) = Nothing
-    -- | Given a TxOut, translate it and return (Just transalation). It is
-    --   possible the address part is a Bootstrap Address, in that case return Nothing
-    --   I.e. don't include Bootstrap Addresses in the answer.
-    txInfoOut \in
-      forall era.
-      ( Era era,
-        Value era ~ Mary.Value (Crypto era)
-      ) =>
-      Alonzo.TxOut era \to
-      Maybe P.TxOut
-    txInfoOut (Alonzo.TxOut addr val datahash) =
-      case transAddr addr of
-        Just ad \to Just (P.TxOut ad (transValue @(Crypto era) val) (transDataHash datahash))
-        Nothing \to Nothing
-    transStakeCred \in Credential keyrole crypto \to P.Credential
-    transStakeCred (ScriptHashObj (ScriptHash (UnsafeHash kh))) =
-      P.ScriptCredential (P.ValidatorHash (P.toBuiltin (fromShort kh)))
-    transStakeCred (KeyHashObj (KeyHash (UnsafeHash kh))) =
-      P.PubKeyCredential (P.PubKeyHash (P.toBuiltin (fromShort kh)))
-    transStakeReference \in StakeReference crypto \to Maybe P.StakingCredential
-    transStakeReference (StakeRefBase cred) = Just (P.StakingHash (transStakeCred cred))
-    transStakeReference (StakeRefPtr (Ptr (SlotNo slot) i1 i2)) =
-      Just (P.StakingPtr (fromIntegral slot) (fromIntegral i1) (fromIntegral i2))
-    transStakeReference StakeRefNull = Nothing
+\begin{figure*}[htb]
+  \begin{align*}
+    \fun{validPlutusdata} \in \type{P.Data} \to \Bool \\
+    \fun{validPlutusdata}~ (\type{P.Constr} \wcard ds) ~=~ \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
+    \fun{validPlutusdata}~ (\type{P.Map} ds) ~=~ \wedge_{d\in ds} (\type{validPlutusdata}~d)
+      all (\(x, y) \to validPlutusdata x && validPlutusdata y) ds \\
+    \fun{validPlutusdata} ~(\type{P.List}~ ds) ~=~  \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
+    \fun{validPlutusdata}~ (\type{P.I}~ \wcard) ~=~ \True \\
+    \fun{validPlutusdata}~ (\type{P.B}~ bs) ~=~ \fun{length} ~bs~ \leq~ 64 \\
+    \text{Checks if a Data term is constructed correctly}
     \nextdef
-    transCred \in Credential keyrole crypto \to P.Credential
-    transCred (KeyHashObj (KeyHash (UnsafeHash kh))) =
-      P.PubKeyCredential (P.PubKeyHash (P.toBuiltin (fromShort kh)))
-    transCred (ScriptHashObj (ScriptHash (UnsafeHash kh))) =
-      P.ScriptCredential (P.ValidatorHash (P.toBuiltin (fromShort kh)))
-      -- ========================================
-      -- translate TxIn and TxOut
-
-      txInfoIn' \in CC.Crypto c => TxIn c \to P.TxOutRef
-      txInfoIn' (TxIn txid nat) = P.TxOutRef (txInfoId txid) (fromIntegral nat)
-      \nextdef
-      -- ==================================
-      -- translate Values
-
-      transPolicyID \in Mary.PolicyID crypto \to P.CurrencySymbol
-      transPolicyID (Mary.PolicyID (ScriptHash (UnsafeHash x))) = P.CurrencySymbol (P.toBuiltin (fromShort x))
-      \nextdef
-      transAssetName \in Mary.AssetName \to P.TokenName
-      transAssetName (Mary.AssetName bs) = P.TokenName (P.toBuiltin bs)
-  \end{align*}
-  \caption{Definitions for Transactions}
-  \label{fig:defs:utxo-shelley-1}
+    \fun{validScript} \in \Script \to \Bool \\
+    \fun{validScript} ~sc~=~\begin{cases}
+      \True & \text{if $sc~\in~\ScriptPhOne$} \\
+      \type{P.validateScript} ~sc & \text{if $sc~\in~\ScriptPhTwo$}
+    \end{cases}
+    \text{Checks if a script is constructed correctly} ]
+  \caption{Script and Data construction correctness checks}
+  \label{fig:data-script-check}
 \end{figure*}
 
 
-slotToPOSIXTime ::
-  (Monad m, HasField "_protocolVersion" (PParams era) ProtVer) =>
-  Core.PParams era ->
-  EpochInfo m ->
-  SystemStart ->
-  SlotNo ->
-  m P.POSIXTime
-slotToPOSIXTime pp ei sysS s = do
-  P.POSIXTime . transTime . nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds
-    <$> epochInfoSlotToUTCTime ei sysS s
-  where
-    transTime =
-      if HardForks.translateTimeForPlutusScripts pp
-        then
-          truncate
-            -- Convert to milliseconds
-            . (* fromInteger 1000)
-        else resolution
 
--- | translate a validity interval to POSIX time
-transVITime ::
-  (Monad m, HasField "_protocolVersion" (PParams era) ProtVer) =>
-  Core.PParams era ->
-  EpochInfo m ->
-  SystemStart ->
-  ValidityInterval ->
-  m P.POSIXTimeRange
-transVITime _ _ _ (ValidityInterval SNothing SNothing) = pure P.always
-transVITime pp ei sysS (ValidityInterval (SJust i) SNothing) = do
-  t <- slotToPOSIXTime pp ei sysS i
-  pure $ P.from t
-transVITime pp ei sysS (ValidityInterval SNothing (SJust i)) = do
-  t <- slotToPOSIXTime pp ei sysS i
-  pure $ P.to t
-transVITime pp ei sysS (ValidityInterval (SJust i) (SJust j)) = do
-  t1 <- slotToPOSIXTime pp ei sysS i
-  t2 <- slotToPOSIXTime pp ei sysS j
-
-
--- | Given a TxIn, look it up in the UTxO. If it exists, translate it and return
---   (Just translation). If does not exist in the UTxO, return Nothing.
-txInfoIn \in
-  forall era.
-  ( Era era,
-    Value era ~ Mary.Value (Crypto era),
-    Core.TxOut era ~ Alonzo.TxOut era
-  ) =>
-  UTxO era \to
-  TxIn (Crypto era) \to
-  Maybe P.TxInInfo
-txInfoIn (UTxO mp) txin =
-  case Map.lookup txin mp of
-    Nothing \to Nothing
-    Just txout \to case transAddr addr of
-      Just ad \to Just (P.TxInInfo (txInfoIn' txin) (P.TxOut ad valout dhash))
-      Nothing \to Nothing
-      where
-        valout = transValue (getField @"value" txout)
-        addr = getField @"address" txout
-        dhash = case getField @"datahash" txout of
-          SNothing \to Nothing
-          SJust safehash \to Just (P.DatumHash (transSafeHash safehash))
-\nextdef
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
--- ===============================================================
--- From the specification, Figure 7 "Script Validation, cont."
--- ===============================================================
-
--- | valContext collects info from the Tx and the UTxO an
---   translates it into a 'Data', which the Plutus language knows how to interpret.
---   The UTxO and the PtrMap are used to 'resolve' the TxIn and the StakeRefPtr's
-valContext \in
-  Era era =>
-  P.TxInfo \to
-  ScriptPurpose (Crypto era) \to
-  Data era
-valContext txinfo sp = Data (P.toData (P.ScriptContext txinfo (transScriptPurpose sp)))
-\nextdef
-data FailureDescription
-  = OnePhaseFailure Text
-  | PlutusFailure Text ByteString
-  deriving (Show, Eq, Ord, Generic, NoThunks)
-
-
-
-
-
-validPlutusdata \in P.Data \to Bool
-validPlutusdata (P.Constr _n ds) = all validPlutusdata ds
-validPlutusdata (P.Map ds) =
-  all (\(x, y) \to validPlutusdata x && validPlutusdata y) ds
-validPlutusdata (P.List ds) = all validPlutusdata ds
-validPlutusdata (P.I _n) = True
-validPlutusdata (P.B bs) = BS.length bs <= 64
 
 -- | Test that every Alonzo script represents a real Script.
 --     Run deepseq to see that there are no infinite computations and that
 --     every Plutus Script unflattens into a real P.Script
-validScript \in Script era \to Bool
-validScript scrip = case scrip of
-  TimelockScript sc \to deepseq sc True
-  PlutusScript bytes \to P.validateScript bytes
