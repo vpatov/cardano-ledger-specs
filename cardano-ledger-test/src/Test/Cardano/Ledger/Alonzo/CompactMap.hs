@@ -7,6 +7,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -140,10 +141,45 @@ withBoth primsize normsize process = runST $ do
 
 arraySize arr = (hi-lo) +1 where (lo,hi) = A.bounds arr
 
+-- | In order to save space, we store things as (Array Int ByteString) and deserialize a [v] of length
+--   'groupsize' from the array, chosing the right thing usingg modular arithmetic on the index 'i'
 readFromGroup :: forall v. FromCBOR v => Int -> A.Array Int ByteString -> Int -> v
 readFromGroup groupsize arr i =  (vals !! (i `mod` groupsize))
   where vals :: [ v ]
         vals = unsafeDeserialize' (index arr (i `div` groupsize))
+
+-- | In order to save space, we store things as (Array Int ByteString) and deserialize a [v] of length
+--   'groupsize' from the array, chosing the right thing using modular arithmetic on the index 'i'
+--   If we read all the values this way (in increasing key order), we will make 'groupsize' consecutive 
+--   reads from the same group, so it is worth it to deserialize each group only once, and use Array
+--   indexing from that group rather than list indexing as is done in 'readFromGroup'
+data CachedArr v where
+   CachedArr :: FromCBOR v =>
+     Int -> -- group size
+     Int -> -- current index of the cache
+     A.Array Int v -> -- the current cache, usually of size group size,
+                      -- but if its the last group it might be smaller.
+     A.Array Int ByteString -> -- the compressed array storing ByteStrings
+     CachedArr v
+
+instance Show v => Show(CachedArr v) where
+   show (CachedArr gs gnum current _) = "(Cached "++show gs++" "++show gnum++" "++show (foldr (:) [] current)++")"
+
+-- | Create a new cache, primed to read from group 0 on the first 'lookupCached'
+newCache :: forall v. FromCBOR v => Int ->  A.Array Int ByteString -> CachedArr v
+newCache groupsize values = CachedArr groupsize 0 current values
+  where list =  (unsafeDeserialize' (index values 0)) :: [v]
+        current = A.listArray (0,length list -1) list
+
+-- | Lookup a value 'v' using index 'i', This works best when we repeatedly read values from consequtive keys
+lookupCached :: forall v. Show v => Int -> CachedArr v -> (CachedArr v,v)
+lookupCached i (cache@(CachedArr groupsize currentgroup current compressed)) = trace ("LOOKUPCACHE "++show (i,cache)) $
+  let groupnum = i `div` groupsize
+  in if groupnum == currentgroup
+        then (cache, index current (i `mod` groupsize))
+        else let list = (unsafeDeserialize' (index compressed groupnum) :: [v])
+                 group = A.listArray (0,length list -1)list
+             in (CachedArr groupsize groupnum group compressed, index group (i `mod` groupsize))
 
 
 -- | If the 'group' is full, serialise it, and then write it to 'mvalues' a index 'jv'
@@ -158,17 +194,15 @@ resetNewGroup groupsize v mvalues jv group  = do
    where newgroup = (reverse (v : group))
 
 
--- | Every 'groupsize' entries into the 'keys' array, we advance one entry into the 'values' array.
---   A 'group' is a deserialized entry from the 'values' array, for groupsize 'keys' entries.
---   So when we advance the index into the 'keys' array, and its group moves to next entry in the
---   'values' array, we need to fetch that group and deserialize it.
---   Note this can only happen when we advance the index into the 'keys' array.
-resetOldGroup :: FromCBOR v => Int -> A.Array Int ByteString -> Int -> Int -> [v] -> (Int,[v])
-resetOldGroup groupsize values ik iv oldgroup  = trace ("RESET OLD GROUP(ik,iv,groupsize)="++show(ik,iv,groupsize)) $
-   if ((ik `mod` groupsize) == 0)
-      then (iv+1,nextgroup)
-      else (iv,oldgroup) 
-   where nextgroup = trace ("DESERIALIZE RESET OLD GROUP") $ unsafeDeserialize' (index values (iv+1))
+-- | Compute the size of new set of keys. If the key of the message appears in the
+--   keys of the parallel array, subtract 1 if delete, add 1 if not, and add 0 if
+--   it does not appear in the keys.
+accumSize2 :: (Ord k, Indexable arr k, Num p) => arr k -> p -> (k,Message v) -> p
+accumSize2 arr ans (key,v)  =
+  case binsearch 0 (isize arr - 1) key arr of
+     Just _ -> (case v of {Delete -> ans-1; _ -> ans})
+     _ -> (case v of {Delete -> ans; _ -> ans+1})
+
 
 flush :: forall a v. (ToCBOR v,FromCBOR v,Show v,Ord a, Prim a,Show a) =>
          Int ->
@@ -177,59 +211,60 @@ flush :: forall a v. (ToCBOR v,FromCBOR v,Show v,Ord a, Prim a,Show a) =>
          [(a,Message v)] ->
          (Message v -> v -> Message v) ->
          (PrimArray a,A.Array Int ByteString)
-flush groupsize keys values list combine = trace ("NEWSIZES "++show(newsize,normsize)) $
-                                           withBoth newsize normsize process where
+flush groupsize keys values list combine = trace ("Sizes "++show(newsize,normsize)) $ withBoth newsize normsize process where
    keysize = sizeofPrimArray keys
    valsize = arraySize values
-   newsize = keysize + foldl' (accumSize keys) 0 (map fst list)
+   newsize = keysize + foldl' (accumSize2 keys) 0 list
    normsize = if newsize `mod` groupsize == 0
                  then newsize `div` groupsize
                  else (newsize `div` groupsize) + 1
    sortedlist = sortBy (\ x y -> compare (fst x) (fst y)) list
-   -- group0 :: [v]
-   -- group0 =  unsafeDeserialize' (index values 0)
-   
+   cachedValues = newCache @v groupsize values
    process :: forall s. MutablePrimArray s a -> STArray s Int ByteString -> ST s ()
-   process mkeys mvalues = loop 0 0 0 0 sortedlist [] 
-     where pushFromList :: Int -> Int -> Int -> Int -> (a,Message v) -> [(a,Message v)] -> [v] -> ST s ()
-           pushFromList ik iv jk jv (k,Delete) vs newgroup =
-              loop ik iv jk jv vs newgroup -- Skip over because its is deleted
-           pushFromList ik -- index into keys
-                        iv -- index into values
-                        jk -- index into mkeys
-                        jv -- index into mvalues
+   process mkeys mvalues = loop 0 cachedValues 0 0 sortedlist [] 
+     where pushFromList :: Ordering -> Int -> CachedArr v -> Int -> Int -> (a,Message v) -> [(a,Message v)] -> [v] -> ST s ()
+           pushFromList EQ ik cache jk jv (k,Delete) vs newgroup =
+              loop (ik+1) cache jk jv vs newgroup -- Skip over index ik, because its is deleted
+           pushFromList cc ik cache jk jv (k,Delete) vs newgroup =
+              loop ik cache jk jv vs newgroup -- Do nothing, deleting key that doesn't exist
+           pushFromList cc ik    -- index into keys
+                        cache -- cached group of values
+                        jk    -- index into mkeys
+                        jv     -- index into mvalues
                         (k,Edit v)
                         vs
                         newgroup = do
               writePrimArray mkeys jk k
               (jv',newgroup') <- resetNewGroup groupsize v mvalues jv newgroup
-              loop ik iv (jk+1) jv' vs newgroup'
-           pushFromArray ik iv jk jv (k,v) vs newgroup = do
+              loop ik cache (jk+1) jv' vs newgroup'
+           pushFromArray ik cache jk jv (k,v) vs newgroup = do
               writePrimArray mkeys jk k
               (jv',newgroup') <- resetNewGroup groupsize v mvalues jv newgroup
-              -- let (iv',oldgroup') = resetOldGroup groupsize values (ik+1) iv oldgroup
-              loop (ik+1) iv (jk+1) jv' vs newgroup'              
-           loop :: Int -> Int -> Int -> Int -> [(a,Message v)] -> [v] -> ST s ()
-           loop ik iv jk jv xs newgroup =
-             trace ("\n  "++show (ik,iv,jk,jv,xs,newgroup)) $
-               case (ik < keysize, iv < valsize, jk < newsize, xs) of
-                  (True,True,True,pairs) -> 
+              loop (ik+1) cache (jk+1) jv' vs newgroup'              
+           loop :: Int -> CachedArr v -> Int -> Int -> [(a,Message v)] -> [v] -> ST s ()
+           loop ik cache jk jv xs newgroup =
+             trace ("\n  "++show (ik,jk,jv,xs,newgroup)++
+                    "\n  OTHER "++show(ik < keysize, jk < newsize, xs)) $
+               case (ik < keysize, jk < newsize, xs) of
+                  (True,True,pairs) -> 
                     let k2 = indexPrimArray keys ik
-                        v2 = readFromGroup groupsize values ik
-                    in trace ("ARRAY PAIRS "++show(k2,v2)) $
-                       case pairs of
-                        [] -> pushFromArray ik iv jk jv (k2,v2) [] newgroup
+                        (cache',v2) = lookupCached ik cache
+                    in case pairs of
+                        [] -> pushFromArray ik cache' jk jv (k2,v2) [] newgroup
                         ((k,v):ys) ->
                            case compare k k2 of
-                             EQ -> pushFromList ik iv jk jv (k,v) ys newgroup
-                             LT -> pushFromList ik iv jk jv (k,combine v v2) ys newgroup
-                             GT -> pushFromArray ik iv jk jv (k2,v2) xs newgroup
-                  (False,_,True,((k,v):xs)) -> pushFromList ik iv jk jv (k,v) xs newgroup
-              -- This case should only happen when we have run out of things to process
-              -- (ik >= keysize), so there is nothing left to copy from 'arr'
-              -- or xs is null , so there is nothing left to copy from 'list'
-              -- or jk >= newsize, so mkeys is already full
-                  other -> pure ()
+                             EQ -> trace ("EQ "++show(k,k2,v,v2)) $ pushFromList EQ ik cache' jk jv (k,v) ys newgroup
+                             LT -> trace ("LT "++show(k,k2,v,v2)) $ pushFromList LT ik cache' jk jv (k,combine v v2) ys newgroup
+                             GT -> pushFromArray ik cache' jk jv (k2,v2) xs newgroup
+                  (False,_,((k,v):xs)) -> pushFromList GT ik cache jk jv (k,v) xs newgroup                      
+                  -- This case should only happen when we have run out of things to process
+                  -- (ik >= keysize), so there is nothing left to copy from 'arr'
+                  -- or xs is null , so there is nothing left to copy from 'list'
+                  -- It might happen that he last action did not fill the newgroup so then
+                  -- we need to write the partial newgroup to the mutable values array: mvalues
+                  other -> if null newgroup
+                              then pure ()
+                              else do MutA.writeArray mvalues jv (serialize' (reverse newgroup))
 
 
 testflush :: Par2 Int Text -> Par2 Int Text     
@@ -240,7 +275,10 @@ testflush (Par2 groupsize keys values delta) = Par2 groupsize ks vs Map.empty
 m2 :: Map.Map Int Text
 m2 = Map.fromList [(1::Int,pack "a"),(2,pack "b"),(9,pack "d"),(5,pack "c")]
 
-p2 = insert2 10 "e" (insert2 12 "f" (toPar2 3 m2))
+
+(Par2 gs1 ks1 vs1 _) = (toPar2 3 m2)
+
+p2 = delete2 6 (insert2 10 "e" (insert2 12 "f" (toPar2 3 m2)))
 
 instance ToCBOR v => ToCBOR (Message v) where
   toCBOR (Edit v) = toCBOR v
