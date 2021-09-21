@@ -96,37 +96,36 @@ Plutus script.
 
 \begin{figure*}[htb]
   \begin{align*}
-    \emph{Hash Types} \\
-    \ScriptHash & \type{P.ValidatorHash} \\
-    \KeyHash & \type{P.PubKeyHash} \\
-    \DataHash & \type{P.DatumHash} \\
-    \TxId & \type{P.TxId} \\
+    & \emph{Hash Types} \\
+    & \ScriptHash & \type{P.ValidatorHash} \\
+    & \KeyHash & \type{P.PubKeyHash} \\
+    & \DataHash & \type{P.DatumHash} \\
+    & \TxId & \type{P.TxId} \\
     ~\\
-    \emph{Transaction Input, ie. Output Reference}  \\
-    \TxIn & \type{P.TxOutRef} \\
+    & \emph{Transaction Input, ie. Output Reference}  \\
+    & \TxIn & \type{P.TxOutRef} \\
     ~\\
-    \emph{Credential Types} \\
-    \Ptr & \type{P.StakingPtr} \\
-    \Credential & \type{P.Credential} \\
-    \Credential & \type{P.StakingHash} \\
-    \StakeCredential & \type{P.StakingCredential} \\
-    \StakeReference crypto \to Maybe P.StakingCredential \\
+    & \emph{Credential Types} \\
+    & \Ptr & \type{P.StakingPtr} \\
+    & \Credential & \type{P.Credential} \\
+    & \Credential & \type{P.StakingHash} \\
+    & \StakeCredential & \type{P.StakingCredential} \\
     ~\\
-    \emph{Credentials and Withdrawals} \\
-    \Wdrl & \type{P.StakingCredential} \times \Integer \\
-    \PolicyID & \type{P.CurrencySymbol} \\
-    \AssetName & \type{P.TokenName} \\
+    & \emph{Credentials and Withdrawals} \\
+    & \Wdrl & \type{P.StakingCredential} \times \Integer \\
+    & \PolicyID & \type{P.CurrencySymbol} \\
+    & \AssetName & \type{P.TokenName} \\
     ~\\
-    \emph{Certificate Types} \\
-    \DCert & \type{P.DCert} \\
-    \DCertRegKey & \type{P.DCertDelegRegKey} \\
-    \DCertDeRegKey & \type{P.DCertDelegDeRegKey} \\
-    \DCertDeleg & & \type{P.DCertDelegDelegate} \\
-    \DCertRetirePool & \type{P.DCertPoolRetire} \\
+    & \emph{Certificate Types} \\
+    & \DCert & \type{P.DCert} \\
+    & \DCertRegKey & \type{P.DCertDelegRegKey} \\
+    & \DCertDeRegKey & \type{P.DCertDelegDeRegKey} \\
+    & \DCertDeleg & \type{P.DCertDelegDelegate} \\
+    & \DCertRetirePool & \type{P.DCertPoolRetire} \\
     ~\\
-    \emph{Data-dropping Certificate Types} \\
-    \DCertGen & \type{P.DCertGenesis} \\
-    \DCertMir & {P.DCertMir} \\
+    & \emph{Data-dropping Certificate Types} \\
+    & \DCertGen & \type{P.DCertGenesis} \\
+    & \DCertMir & \type{P.DCertMir} \\
   \end{align*}
   \caption{TxInfo and Constituent Types}
   \label{fig:txinfo-types}
@@ -134,109 +133,102 @@ Plutus script.
 
 \begin{figure*}[htb]
   \begin{align*}
-    \emph{Script Purpose Types} \\
-    \mathsf{Cert}  & \type{P.Certifying} \\
-    \mathsf{Rwrd} & \type{P.Rewarding} \\
-    \mathsf{Mint} & \type{P.Minting} \\
-    \mathsf{Spend} & \type{P.Spending} \\I
+    & \emph{Script Purpose Types} \\
+    & \mathsf{Cert} & \type{P.Certifying} \\
+    & \mathsf{Rwrd} & \type{P.Rewarding} \\
+    & \mathsf{Mint} & \type{P.Minting} \\
+    & \mathsf{Spend} & \type{P.Spending} \\
     ~\\
-    \emph{Execution Budget Types} \\
-    \Integer & \type{P.ExCPU} \\
-    \Integer  & \type{P.ExMemory}\\
-    \ExUnits & \type{P.ExBudget}  \\
+    & \emph{Execution Budget Types} \\
+    & \Integer & \type{P.ExCPU} \\
+    & \Integer  & \type{P.ExMemory}\\
+    & \ExUnits & \type{P.ExBudget}  \\
     ~\\
-    \emph{TxInfo} \\
-    \TxInfo &= \\
-      & \seqof{ \type{P.TxInInfo}^? } \\ % & \text{inputs} \\ %\type{P.txInfoInputs} &
-      & \text{$\uparrow$ Realized inputs (built by $\fun{txInfoIn}$)} \\
-      & \times \seqof {\type{P.TxOut}^?}  \\
-      & \text{$\uparrow$ outputs} \\ %\type{P.txInfoOutputs}
-      & \times \type{P.Value} \\
-      & \text{$\uparrow$ fee, built by applying $\fun{transValue}\circ\fun{inject}$ to the $\Coin$ fee} \\ %= transValue (inject @(Mary.Value (Crypto era)) fee), \type{P.txInfoFee}
-      & \times \type{P.Value}  \\
-      & \text{$\uparrow$ mint field, built from the mint $\Value$ by $\fun{transValue}$} \\ % = transValue forge, \type{P.txInfoMint}
-      & \times \seqof{\type{P.DCert}}  \\
-      & \text{$\uparrow$ list of certificates} \\ %= foldr (\c ans \to transDCert c : ans) [] (certs' tbody), \type{P.txInfoDCert}
-      & \times (\type{P.StakingCredential} \times \Integer) \\
-      & \text{$\uparrow$ the $\Wdrl$s, reward withdrawal pairs of credential and reward amount} \\ % = Map.toList (transWdrl (wdrls' tbody)), \type{P.txInfoWdrl}
-      & \times \type{P.POSIXTimeRange} \\
-      & \text{$\uparrow$ transaction validity POSIX time range (built by $\fun{transVITime}$)} \\ % = timeRange, \type{P.txInfoValidRange}
-      & \times \seqof{\type{P.PubKeyHash}}  \\
-      & \text{$\uparrow$ hashes of keys whose signature are required} \\ % = map transKeyHash (Set.toList (reqSignerHashes' tbody)), \type{P.txInfoSignatories}
-      & \times \seqof{(\DataHash \times \Data)}  \\
-      & \text{$\uparrow$ list of pairs of datum hashes and their datum preimages} \\ % = map transDataPair datpairs, \type{P.txInfoData}
-      & \times \type{P.TxId} & \text{transaction ID} \\ % =  (transSafeHash (hashAnnotated @(Crypto era) tbody)) \type{P.txInfoId}
-      & \text{$\uparrow$ list of pairs of datum hashes and their datum preimages}
-    \nextdef
+    & \emph{TxInfo} \\
+    & \TxInfo = \\
+      & ~~~~ \seqof{\type{P.TxInInfo^?}} \\ % & \text{inputs} \\ %\type{P.txInfoInputs} &
+      & ~~~~ \text{$\uparrow$ Realized inputs (built by $\fun{txInfoIn}$)} \\
+      & ~~~~ \times \seqof{\type{P.TxOut^?}}  \\
+      & ~~~~ \text{$\uparrow$ outputs} \\ %\type{P.txInfoOutputs}
+      & ~~~~ \times \type{P.Value} \\
+      & ~~~~ \text{$\uparrow$ fee, built by applying $\fun{transValue}\circ\fun{inject}$ to the $\Coin$ fee} \\ %= transValue (inject @(Mary.Value (Crypto era)) fee), \type{P.txInfoFee}
+      & ~~~~ \times \type{P.Value}  \\
+      & ~~~~ \text{$\uparrow$ mint field, built from the mint $\Value$ by $\fun{transValue}$} \\ % = transValue forge, \type{P.txInfoMint}
+      & ~~~~ \times \seqof{\type{P.DCert}}  \\
+      & ~~~~ \text{$\uparrow$ list of certificates} \\ %= foldr (\c ans \to transDCert c : ans) [] (certs' tbody), \type{P.txInfoDCert}
+      & ~~~~ \times (\type{P.StakingCredential} \times \Integer) \\
+      & ~~~~ \text{$\uparrow$ the $\Wdrl$s, reward withdrawal pairs of credential and reward amount} \\ % = Map.toList (transWdrl (wdrls' tbody)), \type{P.txInfoWdrl}
+      & ~~~~ \times \type{P.POSIXTimeRange} \\
+      & ~~~~ \text{$\uparrow$ transaction validity POSIX time range (built by $\fun{transVITime}$)} \\ % = timeRange, \type{P.txInfoValidRange}
+      & ~~~~ \times \seqof{\type{P.PubKeyHash}}  \\
+      & ~~~~\text{$\uparrow$ hashes of keys whose signature are required} \\ % = map transKeyHash (Set.toList (reqSignerHashes' tbody)), \type{P.txInfoSignatories}
+      & ~~~~ \times \seqof{(\DataHash \times \Data)}  \\
+      & ~~~~ \text{$\uparrow$ list of pairs of datum hashes and their datum preimages} \\ % = map transDataPair datpairs, \type{P.txInfoData}
+      & ~~~~ \times \type{P.TxId} \\ % =  (transSafeHash (hashAnnotated @(Crypto era) tbody)) \type{P.txInfoId}
+      & ~~~~ \text{$\uparrow$ list of pairs of datum hashes and their datum preimages}
+  \end{align*}
   \caption{TxInfo and Constituent Types}
   \label{fig:txinfo-types-two}
 \end{figure*}
 
 \begin{figure*}[htb]
   \begin{align*}
-    \fun{transAddr} & \in \Addr  \to  \type{P.Address} \\
-    \fun{transAddr} & a = \begin{cases}
+    & \fun{transAddr} \in \Addr  \to  \type{P.Address} \\
+    & \fun{transAddr} ~a = \begin{cases}
       \Nothing & \text{if}~a~\in~\AddrBS \\
       (ob,~st) & \text{if}~a~=~(\wcard, ob_P, st_P)
-    \end{cases}
-    \text{Address translation}
+    \end{cases} \\
+    & \text{Address translation}
     \nextdef
-    \fun{transValue} & \in \Value \to \type{P.Value} \\
-    \fun{transValue} (c, mp) & = \{~ pid_P\mapsto (aid_P \mapsto q_P) ~\mid~ pid \mapsto (aid \mapsto q) ~\in ~mp ~\} \cup
-    \{~\type{P.adaSymbol}\mapsto (\type{P.adaToken} \mapsto c) ~\} \\
-    \text{Value translation}
+    & \fun{transValue} \in \Value \to \type{P.Value} \\
+    & \fun{transValue}~ (c,~ mp) = \{~ pid_P\mapsto (aid_P \mapsto q_P) ~\mid~ pid \mapsto (aid \mapsto q) ~\in ~mp ~\} \\
+    & ~~~~\cup \{~\type{P.adaSymbol}\mapsto (\type{P.adaToken} \mapsto c) ~\} \\
+    & \text{Value translation}
     \nextdef
-    \fun{transDCert} \in \DCertRegPool \to \type{P.DCertPoolRegister} \\
-    \fun{transDCert} = (DCertPool (RegPool pp)) =
-      P.DCertPoolRegister (transKeyHash (_poolId pp)) (P.PubKeyHash (P.toBuiltin (transHash (_poolVrf pp))))
-    \text{Pool registration certificate translation}
+    & \fun{transDCert} \in \DCertRegPool \to \type{P.DCertPoolRegister} \\
+    & \fun{transDCert}~\var{pool} = (\fun{poolId}~\var{pool},~\fun{poolVrf}~\var{pool}) \\
+    & \text{Pool registration certificate translation}
     \nextdef
-    \fun{txInfoIn} \in \UTxO \to \TxIn \to \type{P.TxInInfo} \\
-    \fun{txInfoIn} utxo txin = \begin{cases}
+    & \fun{txInfoIn} \in \UTxO \to \TxIn \to \type{P.TxInInfo} \\
+    & \fun{txInfoIn}~ utxo~ txin = \begin{cases}
         (\var{txin}_P, \var{txout}_P) & \text{when $(\var{txin}\mapsto\var{txout})\in\var{utxo}$} \\
         \Nothing & \text{otherwise}
       \end{cases} \\
-    \text{Builds a Plutus realized input}
+    & \text{Builds a Plutus realized input}
     \nextdef
-    \fun{transVITime} \in \PParams \to \EpochInfo \to \SystemStart \to \ValidityInterval \to \type{P.POSIXTimeRange} \\
-    \fun{transVITime} pp ei sysS (vs, vf) =
-      \begin{cases}
+    & \fun{transVITime} \in \PParams \to \EpochInfo \to \SystemStart \to \ValidityInterval \to \type{P.POSIXTimeRange} \\
+    & \fun{transVITime} ~pp ~ei~ sysS~ (vs,~ vf) = \\
+    &  ~~~~ \begin{cases}
         \type{P.always} & \text{if } vs = \Nothing ~\wedge~ vf = \Nothing \\
         \type{P.to}~(\fun{slotToPOSIXTime}~pp~ei~sysS~vf) & \text{if } vs = \Nothing ~\wedge~ vf \neq \Nothing \\
         \type{P.from}~(\fun{slotToPOSIXTime}~pp~ei~sysS~vs) & \text{if } vs \neq \Nothing ~\wedge~ vf = \Nothing \\
         (\fun{slotToPOSIXTime}~pp~ei~sysS~vs,~\fun{slotToPOSIXTime}~pp~ei~sysS~vf) & \text{if } vs \neq \Nothing ~\wedge~ vf \neq \Nothing \\
       \end{cases} \\
-      \where \\
-      \fun{slotToPOSIXTime}~pp~ei~sysS~vs~=~\type{ResolutionConstant} \\
-    \text{Translate validity interval to a POSIX time range}
+      & ~~~~\where \\
+      & ~~~~~~~~\fun{slotToPOSIXTime}~pp~ei~sysS~vs~=~\type{ResolutionConstant} \\
+    & \text{Translate validity interval to a POSIX time range}
+  \end{align*}
   \caption{TxInfo Constituent Type Translation Functions}
   \label{fig:txinfo-translations}
 \end{figure*}
 
 \begin{figure*}[htb]
   \begin{align*}
-    \fun{validPlutusdata} \in \type{P.Data} \to \Bool \\
-    \fun{validPlutusdata}~ (\type{P.Constr} \wcard ds) ~=~ \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
-    \fun{validPlutusdata}~ (\type{P.Map} ds) ~=~ \wedge_{d\in ds} (\type{validPlutusdata}~d)
-      all (\(x, y) \to validPlutusdata x && validPlutusdata y) ds \\
-    \fun{validPlutusdata} ~(\type{P.List}~ ds) ~=~  \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
-    \fun{validPlutusdata}~ (\type{P.I}~ \wcard) ~=~ \True \\
-    \fun{validPlutusdata}~ (\type{P.B}~ bs) ~=~ \fun{length} ~bs~ \leq~ 64 \\
-    \text{Checks if a Data term is constructed correctly}
+    & \fun{validPlutusdata} \in \type{P.Data} \to \Bool \\
+    & \fun{validPlutusdata}~ (\type{P.Constr} ~\wcard ~ds) ~=~ \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
+    & \fun{validPlutusdata}~ (\type{P.Map}~ ds) ~=~ \wedge_{(x,y)\in ds} ((\type{validPlutusdata}~x) \wedge (\type{validPlutusdata}~x)) \\
+    & \fun{validPlutusdata} ~(\type{P.List}~ ds) ~=~  \wedge_{d\in ds} (\type{validPlutusdata}~d) \\
+    & \fun{validPlutusdata}~ (\type{P.I}~ \wcard) ~=~ \True \\
+    & \fun{validPlutusdata}~ (\type{P.B}~ bs) ~=~ \fun{length} ~bs~ \leq~ 64 \\
+    & \text{Checks if a Data term is constructed correctly}
     \nextdef
-    \fun{validScript} \in \Script \to \Bool \\
-    \fun{validScript} ~sc~=~\begin{cases}
+    & \fun{validScript} \in \Script \to \Bool \\
+    & \fun{validScript} ~sc~=~\begin{cases}
       \True & \text{if $sc~\in~\ScriptPhOne$} \\
       \type{P.validateScript} ~sc & \text{if $sc~\in~\ScriptPhTwo$}
-    \end{cases}
-    \text{Checks if a script is constructed correctly} ]
+    \end{cases} \\
+    & \text{Checks if a script is constructed correctly}
+  \end{align*}
   \caption{Script and Data construction correctness checks}
   \label{fig:data-script-check}
 \end{figure*}
-
-
-
-
--- | Test that every Alonzo script represents a real Script.
---     Run deepseq to see that there are no infinite computations and that
---     every Plutus Script unflattens into a real P.Script
