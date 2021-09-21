@@ -4,11 +4,17 @@ Min-Ada-Value Calculation in Alonzo
 The calculation
 #################
 
+There is no longer a ``minUTxOValue`` protocol parameter in Alonzo, it was
+deprecated at the end of the Mary era. However, the requirement that each
+UTxO must contain an amount of ada that depends on the size of the entry.
+The size-dependent minimum ada amount in a UTxO is still referred to as the min-ada-value, and
+is now calculated using the Alonzo parameter ``coinsPerUTxOWord``.
+
 The minimum ada value calculation relies on the ``size`` function for determining
-the size of a token bundle or a lovelace value, which is described in 
+the size of a token bundle or a lovelace value, which is described in
 the Mary era min-value document.
 
-The formula is
+The formula for the min-ada-value calculation, for a UTxO containing an output ``txout`, is:
 
 ``utxoEntrySize (txout) * coinsPerUTxOWord``
 
@@ -16,12 +22,18 @@ where
 
 ``utxoEntrySize (txout) = utxoEntrySizeWithoutVal + size (v) + dataHashSize (dh)``
 
+The ``v`` variable is the token bundle inside the ``txout`` output, and
+``dh`` is the hash of the datum that is contained in the output. If there is
+no datum, the hash is represented by ``Nothing``, and takes up ``0`` space.
+
 Example min-ada-value calculations and current constants
 #########################################################
 
 Note that the ``coinsPerUTxOWord`` is a protocol parameter and is subject to
 change. The values ``utxoEntrySizeWithoutVal`` and ``dataHashSize (dh)``
 are fixed at least for the entire Alonzo era.
+
+The following table gives the values of the constants used in the calculation above.
 
 +------------------------------------------+---------------------+
 | Ada-only min-utxo value (in lovelace)    |1,000,000 (1 ada)    |
